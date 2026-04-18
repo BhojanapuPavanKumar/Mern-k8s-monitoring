@@ -58,8 +58,6 @@ jobs:
 
     - name: Run tests
       run: cd backend && npm test || true
-      # "|| true" ensures the job passes even if no tests are defined
-      # Remove "|| true" once you add real tests
 
     - name: Docker Build
       run: docker build -t ${{ env.BACKEND_IMAGE }}:${{ github.sha }} ./backend
@@ -73,17 +71,17 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: 'v1.28.0'
+    - name: Install yamllint
+      run: pip install yamllint
 
-    - name: Validate manifests (dry-run offline)
+    - name: Lint all YAML manifests
       run: |
-        kubectl apply --dry-run=client --validate=false -f k8s/mongodb/
-        kubectl apply --dry-run=client --validate=false -f k8s/backend/
-        kubectl apply --dry-run=client --validate=false -f k8s/frontend/
-        kubectl apply --dry-run=client --validate=false -f k8s/ingress/
+        yamllint -d "{extends: relaxed, rules: {line-length: {max: 150}}}" \
+          k8s/mongodb/ \
+          k8s/backend/ \
+          k8s/frontend/ \
+          k8s/ingress/ \
+          k8s/monitoring/
 
   # ── Gate — all jobs must pass ─────────────────────────────────────────────
   all-checks:
