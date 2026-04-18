@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: mern-app
+  labels:
+    app: backend
+
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: backend
+
+  template:
+    metadata:
+      labels:
+        app: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+
+    spec:
+      containers:
+      - name: backend
+        image: mern-backend:v1.0
+        imagePullPolicy: Never
+
+        ports:
+        - containerPort: 5000
+
+        env:
+
+        # REQUIRED ENV VARIABLES FROM YOUR .env
+        - name: PORT
+          value: "5000"
+
+        - name: FRONTEND_URL
+          value: "http://127.0.0.1:9933"
+
+        - name: MONGO_DB_URL
+          value: "mongodb://mongodb-service:27017/merndb"
+
+        - name: SMTP_USER
+          value: "bhojanapupavankumar26@gmail.com"
+
+        - name: SMTP_PASS
+          value: "gvhq ehrr jhey pxdr"
+
+        - name: JWT_SECRET
+          value: "my_secretnsgrsvfb#@%dwdwwswjdwh27"
+
+
+        # HEALTH CHECKS
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+
+
+        # RESOURCE LIMITS
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+
+          limits:
+            memory: "256Mi"
+            cpu: "500m"

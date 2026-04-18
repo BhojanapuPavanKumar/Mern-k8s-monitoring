@@ -1,0 +1,182 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mern-app-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus-stack   # Must match: helm list -n monitoring
+spec:
+  groups:
+
+  # ── Application Alerts ────────────────────────────────────────────────────
+  - name: mern-app.application
+    interval: 30s
+    rules:
+
+    - alert: HighErrorRate
+      # Fires if >10% of backend requests return 5xx for 2 minutes
+      expr: |
+        sum(rate(http_requests_total{status_code=~"5.."}[5m]))
+        /
+        sum(rate(http_requests_total[5m])) > 0.10
+      for: 2m
+      labels:
+        severity: critical
+        namespace: mern-app
+      annotations:
+        summary: "High 5xx error rate on backend"
+        description: "Error rate is {{ $value | humanizePercentage }} for the past 2 minutes."
+
+    - alert: HighRequestLatency
+      # Fires if P95 response time exceeds 1 second for 2 minutes
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
+        ) > 1
+      for: 2m
+      labels:
+        severity: warning
+        namespace: mern-app
+      annotations:
+        summary: "High P95 latency on backend"
+        description: "95th percentile latency is {{ $value | humanizeDuration }} (threshold: 1s)."
+
+    - alert: NoTraffic
+      # Fires if backend receives zero requests for 5 minutes (dead service)
+      expr: sum(rate(http_requests_total[5m])) == 0
+      for: 5m
+      labels:
+        severity: warning
+        namespace: mern-app
+      annotations:
+        summary: "Backend is receiving no traffic"
+        description: "No HTTP requests recorded on backend for the last 5 minutes."
+
+  # ── Kubernetes Pod Alerts ──────────────────────────────────────────────────
+  - name: mern-app.pods
+    interval: 30s
+    rules:
+
+    - alert: PodNotReady
+      expr: kube_pod_status_ready{namespace="mern-app", condition="true"} == 0
+      for: 1m
+      labels:
+        severity: warning
+        namespace: mern-app
+      annotations:
+        summary: "Pod not ready: {{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} in mern-app has been unready for 1 minute."
+
+    - alert: PodCrashLooping
+      # load-test pod is excluded — it intentionally crashes
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="mern-app",pod!~"load-test.*"}[15m]) > 0
+      for: 5m
+      labels:
+        severity: critical
+        namespace: mern-app
+      annotations:
+        summary: "Pod crash looping: {{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} is restarting frequently. Check logs immediately."
+
+    - alert: PodOOMKilled
+      expr: |
+        kube_pod_container_status_last_terminated_reason{namespace="mern-app", reason="OOMKilled"} == 1
+      for: 0m
+      labels:
+        severity: critical
+        namespace: mern-app
+      annotations:
+        summary: "Pod OOM Killed: {{ $labels.pod }}"
+        description: "Container {{ $labels.container }} in pod {{ $labels.pod }} was killed due to out-of-memory."
+
+  # ── Resource Alerts ────────────────────────────────────────────────────────
+  - name: mern-app.resources
+    interval: 30s
+    rules:
+
+    - alert: HighCPUUsage
+      expr: |
+        sum(rate(container_cpu_usage_seconds_total{namespace="mern-app", container!="", container!="POD"}[1m]))
+        by (pod, container) > 0.5
+      for: 2m
+      labels:
+        severity: warning
+        namespace: mern-app
+      annotations:
+        summary: "High CPU: {{ $labels.container }}"
+        description: "Container {{ $labels.container }} in pod {{ $labels.pod }} CPU > 50% for 2 minutes."
+
+    - alert: HighMemoryUsage
+      expr: |
+        container_memory_usage_bytes{namespace="mern-app", container!="", container!="POD"}
+        > 200 * 1024 * 1024
+      for: 5m
+      labels:
+        severity: warning
+        namespace: mern-app
+      annotations:
+        summary: "High memory: {{ $labels.container }}"
+        description: "Container {{ $labels.container }} is using {{ $value | humanize1024 }}B RAM (threshold: 200Mi)."
+
+    - alert: HPAAtMaxReplicas
+      # Fires when HPA has scaled to maximum — cluster may be overwhelmed
+      expr: |
+        kube_horizontalpodautoscaler_status_current_replicas{namespace="mern-app"}
+        ==
+        kube_horizontalpodautoscaler_spec_max_replicas{namespace="mern-app"}
+      for: 5m
+      labels:
+        severity: warning
+        namespace: mern-app
+      annotations:
+        summary: "HPA at max replicas: {{ $labels.horizontalpodautoscaler }}"
+        description: "HPA {{ $labels.horizontalpodautoscaler }} has been at max replicas for 5 minutes."
+
+  # ── MongoDB Alerts ─────────────────────────────────────────────────────────
+  - name: mern-app.mongodb
+    interval: 30s
+    rules:
+
+    - alert: MongoDBDown
+      expr: up{job="mongodb-exporter-monitor"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        namespace: mern-app
+      annotations:
+        summary: "MongoDB exporter is down"
+        description: "Prometheus cannot reach the MongoDB exporter. MongoDB may be down."
+
+    - alert: MongoDBHighConnections
+      expr: mongodb_connections{state="current"} > 100
+      for: 2m
+      labels:
+        severity: warning
+        namespace: mern-app
+      annotations:
+        summary: "MongoDB high connection count"
+        description: "MongoDB has {{ $value }} active connections (threshold: 100)."
+
+  # ── Node Alerts ────────────────────────────────────────────────────────────
+  - name: mern-app.node
+    interval: 60s
+    rules:
+
+    - alert: NodeDiskPressure
+      expr: kube_node_status_condition{condition="DiskPressure", status="true"} == 1
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Node disk pressure: {{ $labels.node }}"
+        description: "Node {{ $labels.node }} is under disk pressure. Free up disk space."
+
+    - alert: NodeMemoryPressure
+      expr: kube_node_status_condition{condition="MemoryPressure", status="true"} == 1
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Node memory pressure: {{ $labels.node }}"
+        description: "Node {{ $labels.node }} is under memory pressure."

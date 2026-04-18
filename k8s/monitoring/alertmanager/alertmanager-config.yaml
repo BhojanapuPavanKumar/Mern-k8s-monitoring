@@ -1,0 +1,88 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: mern-app-alertmanager-config
+  namespace: monitoring
+  labels:
+    alertmanagerConfig: mern-app
+spec:
+
+  route:
+    receiver: "default-receiver"
+    groupBy: ['alertname', 'namespace', 'severity']
+    groupWait: 30s        # Wait 30s before sending first notification (batch related alerts)
+    groupInterval: 5m     # Wait 5m before sending updated notification for same group
+    repeatInterval: 12h   # Re-notify every 12h if alert is still firing
+    routes:
+
+    # Critical alerts → notified immediately, re-notified every 1h
+    - receiver: "critical-receiver"
+      matchers:
+      - name: severity
+        value: critical
+      groupWait: 10s
+      repeatInterval: 1h
+
+    # Warning alerts → use default receiver
+    - receiver: "default-receiver"
+      matchers:
+      - name: severity
+        value: warning
+
+  receivers:
+
+  # ── Default Receiver (warnings) ─────────────────────────────────────────
+  # Uncomment ONE of the options below and fill in your details.
+  # Currently set to null (no-op) so the config applies without errors.
+
+  - name: "default-receiver"
+    # OPTION A — Gmail / SMTP
+    # emailConfigs:
+    # - to: "your-email@gmail.com"
+    #   from: "alertmanager@mern-app.local"
+    #   smarthost: "smtp.gmail.com:587"
+    #   authUsername: "your-email@gmail.com"
+    #   authPassword:
+    #     secret:
+    #       name: alertmanager-smtp-secret
+    #       key: password
+    #   requireTLS: true
+    #   headers:
+    #     Subject: "[MERN-K8s] {{ .GroupLabels.alertname }} - {{ .Status | toUpper }}"
+
+    # OPTION B — Slack
+    # slackConfigs:
+    # - apiURL:
+    #     secret:
+    #       name: alertmanager-slack-secret
+    #       key: webhook-url
+    #   channel: "#mern-alerts"
+    #   sendResolved: true
+    #   title: "[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}"
+    #   text: "{{ range .Alerts }}*Alert:* {{ .Annotations.summary }}\n*Details:* {{ .Annotations.description }}\n{{ end }}"
+
+    webhookConfigs: []   # remove this line once you configure a real receiver above
+
+  # ── Critical Receiver (immediate, critical severity only) ───────────────
+  - name: "critical-receiver"
+    # Same options as above — configure a more urgent channel (PagerDuty, SMS)
+    # pagerdutyConfigs:
+    # - routingKey:
+    #     secret:
+    #       name: alertmanager-pagerduty-secret
+    #       key: routing-key
+    #   description: "{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.description }}"
+
+    webhookConfigs: []   # remove this line once you configure a real receiver above
+
+  # ── Inhibit Rules ────────────────────────────────────────────────────────
+  # Suppress warning if a critical alert is already firing for the same pod.
+  # This prevents alert fatigue from duplicate notifications.
+  inhibitRules:
+  - sourceMatch:
+    - name: severity
+      value: critical
+    targetMatch:
+    - name: severity
+      value: warning
+    equal: ['alertname', 'namespace', 'pod']
